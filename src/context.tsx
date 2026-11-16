@@ -12,19 +12,19 @@ const C = createContext<AppContext>({ ready: false, categories: [], refresh: asy
 export function Provider({ children }: {
     children: React.ReactNode;
 }) {
-    const [ready, setReady] = useState(false), [categories, setCategories] = useState<Category[]>([]), [error, setError] = useState(false);
+    const [ready, setReady] = useState(false), [categories, setCategories] = useState<Category[]>([]), [error, setError] = useState('');
     async function refresh() { setCategories(await getCategories()); }
-    async function load() { setError(false); try {
+    async function load() { setError(''); try {
         await initDb();
         await refresh();
         setReady(true);
     }
-    catch {
-        setError(true);
+    catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Spróbuj ponownie.');
     } }
     useEffect(() => { void load(); }, []);
     if (error)
-        return <View style={[s.content, { flex: 1, justifyContent: 'center' }]}><Text style={s.name}>Nie udało się otworzyć budżetu.</Text><Text style={s.hint}>Spróbuj ponownie. Nie usuwaj aplikacji — jej dane są zapisane na tym urządzeniu.</Text><Button title="Spróbuj ponownie" onPress={() => void load()}/></View>;
+        return <View style={[s.content, { flex: 1, justifyContent: 'center' }]}><Text style={s.name}>Nie udało się otworzyć budżetu.</Text><Text style={s.hint}>{error}</Text><Text style={s.hint}>Nie usuwaj danych aplikacji. Jeśli budżet jest otwarty w innej karcie, zamknij ją i spróbuj ponownie.</Text><Button title="Spróbuj ponownie" onPress={() => void load()}/></View>;
     if (!ready)
         return <ActivityIndicator style={{ flex: 1 }}/>;
     return <C.Provider value={{ ready, categories, refresh }}>{children}</C.Provider>;

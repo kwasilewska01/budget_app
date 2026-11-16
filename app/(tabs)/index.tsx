@@ -1,5 +1,6 @@
+import {Alert} from '../../src/alert';
 import React, { useCallback, useRef, useState } from 'react';
-import { ScrollView, Text, View, ActivityIndicator, Alert, Pressable } from 'react-native';
+import { ScrollView, Text, View, ActivityIndicator, Pressable} from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useExpenses } from '../../src/expenses';
 import { useBudget } from '../../src/context';

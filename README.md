@@ -1,6 +1,6 @@
-# Mój budżet — aplikacja mobilna 1.0.0
+# Mój budżet — Android, iPhone i PWA
 
-React Native + TypeScript + Expo SDK 58 + Expo Router + Expo SQLite + lokalne powiadomienia.
+React Native + TypeScript + Expo SDK 58 + Expo Router + Expo SQLite. Aplikacja mobilna z lokalnymi przypomnieniami oraz instalowalna wersja PWA do przeglądarki.
 
 ## Uruchomienie i sprawdzenie
 
@@ -101,3 +101,33 @@ Testy: `npm test` (Node.js 22.13+ z modułem `node:sqlite`), kontrola typów: `n
 Projekt jest zgodny z Expo Go dla SDK 58. Po aktualizacji zakończ stary serwer Metro (Ctrl+C), uruchom `npm start -- --clear --go` i ponownie zeskanuj nowy kod QR w Expo Go. Przeładowanie aplikacji podłączonej do starego serwera może nadal pokazywać SDK 54.
 
 Zaktualizowano również wygenerowany projekt iOS, zachowując jego dotychczasowy identyfikator `pl.mojbudzet.dev` i zespół podpisujący w konfiguracji Expo. Uruchamianie w Expo Go nie wymaga CocoaPods; własna kompilacja iOS wymaga ponownego zainstalowania podów i narzędzi obsługiwanych przez SDK 58.
+
+## PWA w przeglądarce i Netlify
+
+```bash
+npm ci
+npm run build:web
+npm run preview:web
+```
+
+Podgląd gotowej wersji PWA działa pod `http://127.0.0.1:4173`. Do tworzenia interfejsu można też użyć `npm run web`; tryb deweloperski nie rejestruje service workera offline.
+
+W Netlify wybierz **Add new project → Import an existing project → GitHub → kwasilewska01/budget_app** i gałąź `main`. Repozytorium zawiera `netlify.toml`, więc ustawienia są gotowe: komenda `npm run build:web`, katalog publikacji `dist`, Node 22.14. Netlify uruchomi nowe wdrożenie po kolejnych pushach.
+
+Plik konfiguracyjny ustawia także przekierowania dla adresów takich jak `/wydatki` i nagłówki wymagane przez SQLite w przeglądarce. Nie zastępuj go samą publikacją HTML bez tych nagłówków. Przy ręcznym przeciąganiu folderu `dist` do Netlify konfiguracja repozytorium nie jest automatycznie odczytywana — korzystaj z importu GitHub.
+
+Po pierwszym otwarciu online aplikacja zapisuje wszystkie swoje pliki, w tym silnik bazy danych, do pracy offline. Można potem przeglądać budżet, dodawać i usuwać zakupy oraz otwierać zakładki bez internetu. Aktualizacja czeka na potwierdzenie przyciskiem „Zapisz zmiany i odśwież”; nie wymusza samoczynnego przeładowania podczas wpisywania wydatku.
+
+Instalacja PWA:
+
+- iPhone: Safari → Udostępnij → Do ekranu początkowego.
+- Android: Chrome → Zainstaluj aplikację / Dodaj do ekranu głównego.
+- Komputer: ikona instalacji w pasku adresu lub opcja w menu przeglądarki.
+
+W Ustawieniach jest przycisk instalacji, jeśli przeglądarka go udostępnia. Ikony i nazwa są takie same jak w aplikacji mobilnej.
+
+Dane pozostają lokalne (SQLite w prywatnym magazynie przeglądarki). Potrzebna jest aktualna przeglądarka z obsługą tego magazynu i bezpieczny adres HTTPS — localhost jest dozwolony do testów. Jednocześnie otwieraj budżet w jednej karcie/oknie; druga karta pokaże instrukcję, zamiast próbować równoczesnego zapisu. Zamknięcie strony nie usuwa zapisów. Tryb prywatny, wyczyszczenie danych witryny, usunięcie profilu przeglądarki lub automatyczne sprzątanie magazynu może je usunąć. Przycisk „Chroń lokalne dane” prosi przeglądarkę o trwały magazyn, ale nie zastępuje kopii zapasowej.
+
+PWA i aplikacja mobilna nie synchronizują danych automatycznie. Przenieś budżet plikiem JSON przez **Ustawienia → Kopia zapasowa**. Import zastępuje cały budżet; można cofnąć ostatnie przywrócenie. Cotygodniowe powiadomienia przy zamkniętej aplikacji pozostają funkcją wersji natywnej — PWA ich nie planuje.
+
+Testy PWA: `npm run test:web` po `npm run build:web`. Na Macu testy korzystają z zainstalowanego Google Chrome. Na pozostałych systemach zainstaluj przeglądarkę testową przez `npx playwright install chromium` lub wskaż ją przez `PLAYWRIGHT_EXECUTABLE_PATH`. Testy sprawdzają zapis zakupów po odświeżeniu, ponowne otwarcie offline, import/eksport i cofanie kopii, usuwanie wpisu, blokadę drugiej karty i układ na komputerze. Nie używają danych użytkownika.

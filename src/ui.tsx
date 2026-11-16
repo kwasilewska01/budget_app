@@ -1,6 +1,7 @@
+import {Alert} from './alert';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet} from 'react-native';
 export const colors = { ink: '#182b3b', muted: '#64748b', bg: '#f4f6f8', blue: '#1e587e', green: '#177245', red: '#b42318' };
 export function Card({ children }: {
     children: React.ReactNode;

@@ -14,7 +14,7 @@ const domain=load('src/domain.ts');
 function database(){
  const raw=new DatabaseSync(':memory:');
  const adapter={execAsync:async sql=>raw.exec(sql),runAsync:async(sql,...args)=>raw.prepare(sql).run(...args),getFirstAsync:async(sql,...args)=>raw.prepare(sql).get(...args)??null,getAllAsync:async(sql,...args)=>raw.prepare(sql).all(...args),withExclusiveTransactionAsync:async work=>{raw.exec('BEGIN');try{await work(adapter);raw.exec('COMMIT')}catch(e){raw.exec('ROLLBACK');throw e}}};
- return {raw,api:load('src/db.ts',{'expo-sqlite':{openDatabaseAsync:async()=>adapter},'./domain':domain})};
+ return {raw,api:load('src/db.ts',{'expo-sqlite':{openDatabaseAsync:async()=>adapter},'./domain':domain,'react-native':{Platform:{OS:'ios'}}})};
 }
 const c={id:'food',name:'Zakupy',kind:'daily',plan:500,frequency:'month'};
 test('Kwoty z przecinkiem i walidacja',()=>{

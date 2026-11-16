@@ -1,5 +1,6 @@
+import {Alert} from '../../src/alert';
 import React, { useState } from 'react';
-import { ScrollView, Text, View, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { ScrollView, Text, View, Pressable, ActivityIndicator} from 'react-native';
 import { useBudget } from '../../src/context';
 import { saveCategory, deleteCategory, editCategory } from '../../src/db';
 import { Category, Kind, Frequency, PRESETS, numberFromInput } from '../../src/domain';

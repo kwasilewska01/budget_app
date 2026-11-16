@@ -1,5 +1,6 @@
+import {Alert} from './alert';
 import React, {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, Alert, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {addExpense, deleteExpense, getExpenseHistory} from './db';
 import {useBudget} from './context';

@@ -1,11 +1,41 @@
 import * as SQLite from 'expo-sqlite';
+import {Platform} from 'react-native';
 import { Category, Expense, MonthData, emptyMonth, validExpenseDate, weeklyCents } from './domain';
 let db: SQLite.SQLiteDatabase;
 let initialization: Promise<void> | undefined;
-export function initDb() { return initialization ??= initialize().catch(error => { initialization = undefined; throw error; }); }
+let releaseBrowserLock:(()=>void)|undefined;
+export function initDb() {
+    return initialization ??= initialize().catch(async error => {
+        try { if(db)await db.closeAsync(); } catch {}
+        releaseBrowserLock?.();releaseBrowserLock=undefined;
+        initialization=undefined;throw error;
+    });
+}
+async function acquireBrowserLock(){
+    if(!navigator.locks)return;
+    await new Promise<void>((resolve,reject)=>{
+        void navigator.locks.request('moj-budzet-database',{mode:'exclusive',ifAvailable:true},async lock=>{
+            if(!lock){reject(new Error('Budżet jest otwarty w innej karcie lub oknie. Zamknij je i spróbuj ponownie.'));return;}
+            const held=new Promise<void>(release=>{releaseBrowserLock=release});
+            resolve();
+            // The browser releases this lock when this document closes, including on a crash.
+            await held;
+        }).catch(reject);
+    });
+}
+async function withTransaction(work:(tx:SQLite.SQLiteDatabase)=>Promise<void>){
+    if(Platform.OS==='web')await db.withTransactionAsync(()=>work(db));
+    else await db.withExclusiveTransactionAsync(work);
+}
 async function initialize() {
+    if(Platform.OS==='web'){
+        if(!window.isSecureContext || !window.crossOriginIsolated || typeof SharedArrayBuffer==='undefined')throw new Error('Nie można uruchomić bezpiecznego zapisu danych. Otwórz aplikację pod jej adresem HTTPS.');
+        if(!navigator.storage?.getDirectory)throw new Error('Ta przeglądarka nie obsługuje lokalnego zapisu budżetu. Użyj aktualnego Safari, Chrome lub Edge poza trybem prywatnym.');
+        await acquireBrowserLock();
+    }
     db = await SQLite.openDatabaseAsync('moj-budzet.db');
-    await db.execAsync(`PRAGMA journal_mode = WAL;
+    await db.execAsync(Platform.OS==='web'?'PRAGMA journal_mode = DELETE;':'PRAGMA journal_mode = WAL;');
+    await db.execAsync(`
  CREATE TABLE IF NOT EXISTS categories(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,plan REAL NOT NULL DEFAULT 0,frequency TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS months(key TEXT PRIMARY KEY,salary REAL NOT NULL DEFAULT 0,unplanned REAL NOT NULL DEFAULT 0,reserve REAL NOT NULL DEFAULT 0,savings REAL NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS actuals(category_id TEXT NOT NULL,period_key TEXT NOT NULL,amount REAL NOT NULL DEFAULT 0,PRIMARY KEY(category_id,period_key));`);
@@ -39,14 +69,14 @@ async function initialize() {
         await ensurePlans(period);
     const moneyVersion = await db.getFirstAsync("SELECT value FROM app_meta WHERE key='money-cents'");
     if (!moneyVersion)
-        await db.withExclusiveTransactionAsync(async (tx) => {
+        await withTransaction(async (tx) => {
             await tx.execAsync('UPDATE categories SET plan=ROUND(plan*100);UPDATE month_plans SET plan=ROUND(plan*100);UPDATE actuals SET amount=ROUND(amount*100);UPDATE months SET salary=ROUND(salary*100),unplanned=ROUND(unplanned*100),reserve=ROUND(reserve*100),savings=ROUND(savings*100)');
             await tx.runAsync("INSERT INTO app_meta VALUES('money-cents','1')");
         });
     await ensurePlans(new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'));
 }
 async function ensurePlans(period: string) {
-    await db.withExclusiveTransactionAsync(async (tx) => {
+    await withTransaction(async (tx) => {
         const exists = await tx.getFirstAsync('SELECT period FROM plan_months WHERE period=?', period);
         if (exists)
             return;
@@ -60,7 +90,7 @@ async function copyPlanImpl(source: string, target: string) {
     if(source===target)return;
     await ensurePlans(source);
     await ensurePlans(target);
-    await db.withExclusiveTransactionAsync(async tx => {
+    await withTransaction(async tx => {
         // Keep categories with recorded spending even when absent from the copied template.
         const retained = await tx.getAllAsync<Category>(`SELECT id,name,kind,plan,frequency FROM month_plans WHERE period=? AND id IN (
             SELECT category_id FROM expenses WHERE substr(spent_on,1,7)=?
@@ -82,7 +112,7 @@ async function saveCategoryImpl(c: Category) {
     c = { ...c, name: c.name.trim() };
     const period = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
     await ensurePlans(period);
-    await db.withExclusiveTransactionAsync(async (tx) => {
+    await withTransaction(async (tx) => {
         await tx.runAsync('INSERT INTO categories(id,name,kind,plan,frequency) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,plan=excluded.plan,frequency=excluded.frequency', c.id, c.name, c.kind, Math.round(c.plan * 100), c.frequency);
         await tx.runAsync('INSERT INTO month_plans VALUES(?,?,?,?,?,?) ON CONFLICT(period,id) DO UPDATE SET name=excluded.name,plan=excluded.plan,frequency=excluded.frequency', period, c.id, c.name, c.kind, Math.round(c.plan * 100), c.frequency);
     });
@@ -109,7 +139,7 @@ async function saveMonthFieldImpl(period: string, field: keyof MonthData, amount
 const backupTables = ['categories', 'months', 'actuals', 'month_plans', 'plan_months', 'expenses'] as const;
 async function exportBackupImpl() {
     const tables: Record<string, unknown[]> = {};
-    await db.withExclusiveTransactionAsync(async (tx) => { for (const table of backupTables)
+    await withTransaction(async (tx) => { for (const table of backupTables)
         tables[table] = await tx.getAllAsync(`SELECT * FROM ${table}`); });
     return JSON.stringify({ format: 'moj-budzet', version: 3, createdAt: new Date().toISOString(), tables }, null, 2);
 }
@@ -157,7 +187,7 @@ export function validateBackup(text: string) {
 }
 async function restoreBackupImpl(text: string) {
     const tables = validateBackup(text);
-    await db.withExclusiveTransactionAsync(async (tx) => {
+    await withTransaction(async (tx) => {
         for (const table of [...backupTables].reverse())
             await tx.execAsync(`DELETE FROM ${table}`);
         for (const table of backupTables)
@@ -201,7 +231,7 @@ async function addExpenseImpl(expense: Expense) {
     if(!category)throw new Error('Wybierz aktywną kategorię.');
     const period=expense.spentOn.slice(0,7);
     await ensurePlans(period);
-    await db.withExclusiveTransactionAsync(async tx=>{
+    await withTransaction(async tx=>{
         await tx.runAsync('INSERT OR IGNORE INTO month_plans VALUES(?,?,?,?,?,?)',period,category.id,category.name,category.kind,Math.round(category.plan*100),category.frequency);
         await tx.runAsync('INSERT INTO expenses(id,category_id,amount,spent_on,created_at,note) VALUES(?,?,?,?,?,?)',expense.id,category.id,cents,expense.spentOn,expense.createdAt,expense.note.trim());
     });
@@ -218,3 +248,18 @@ async function deleteExpenseImpl(id:string){await db.runAsync('DELETE FROM expen
 export const addExpense=(...args:Parameters<typeof addExpenseImpl>)=>enqueue(()=>addExpenseImpl(...args));
 export const getExpenseHistory=(...args:Parameters<typeof getExpenseHistoryImpl>)=>enqueue(()=>getExpenseHistoryImpl(...args));
 export const deleteExpense=(...args:Parameters<typeof deleteExpenseImpl>)=>enqueue(()=>deleteExpenseImpl(...args));
+
+async function restoreBackupWithUndoImpl(text:string){
+    validateBackup(text);
+    const previous=await exportBackupImpl();
+    await db.runAsync("INSERT INTO app_meta(key,value) VALUES('backup-before-restore',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",previous);
+    await restoreBackupImpl(text);
+}
+async function undoLastRestoreImpl(){
+    const saved=await db.getFirstAsync<{value:string}>("SELECT value FROM app_meta WHERE key='backup-before-restore'");
+    if(!saved)throw new Error('Nie przywracano jeszcze kopii w tej przeglądarce.');
+    await restoreBackupImpl(saved.value);
+}
+export const restoreBackupWithUndo=(text:string)=>enqueue(()=>restoreBackupWithUndoImpl(text));
+export const undoLastRestore=()=>enqueue(()=>undoLastRestoreImpl());
+export const flushPendingWrites=()=>enqueue(async()=>{});

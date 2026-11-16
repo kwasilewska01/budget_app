@@ -29,3 +29,8 @@ expo-env.d.ts
 *.sqlite-*
 *.sqlite3
 coverage/
+
+# Local web previews and browser test output
+.netlify/
+playwright-report/
+test-results/
