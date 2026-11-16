@@ -5,7 +5,7 @@ import {ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pres
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {addExpense, deleteExpense, getExpenseHistory} from './db';
 import {useBudget} from './context';
-import {Category, dateKey, Expense, expenseDateFromInput, expenseDateLabel, money, numberFromInput, weekLabel} from './domain';
+import {Category, dateKey, Expense, expenseDateFromInput, expenseDateInputError, expenseDateLabel, money, numberFromInput, weekLabel} from './domain';
 import {Button, colors, s} from './ui';
 
 type HistoryRequest = {category: Category; period: string};
@@ -40,6 +40,9 @@ export function ExpenseProvider({children}: {children: React.ReactNode}) {
     const [categoryId,setCategoryId] = useState('');
     const [amount,setAmount] = useState('');
     const [date,setDate] = useState('');
+    const [dateTouched,setDateTouched]=useState(false);
+    const dateError=expenseDateInputError(date);
+    const showDateError=!!dateError&&(dateTouched||date.trim().length>=10);
     const [note,setNote] = useState('');
     const [error,setError] = useState('');
     const [busy,setBusy] = useState(false);
@@ -53,7 +56,7 @@ export function ExpenseProvider({children}: {children: React.ReactNode}) {
     const deletingRef = useRef(false);
     function openAdd(selected?: string) {
         if(selected && !categories.some(c=>c.id===selected)) {Alert.alert('Kategoria zarchiwizowana','Dodaj wydatek do jednej z aktywnych kategorii przyciskiem ＋ w dolnym menu.');return;}
-        setCategoryId(selected || categories[0]?.id || '');setAmount('');setNote('');setError('');setDate(expenseDateLabel(dateKey(new Date())));requestId.current=newId();setHistory(null);setComposer(true);
+        setCategoryId(selected || categories[0]?.id || '');setAmount('');setNote('');setError('');setDateTouched(false);setDate(expenseDateLabel(dateKey(new Date())));requestId.current=newId();setHistory(null);setComposer(true);
     }
     function closeComposer() {if(saving.current)return;setComposer(false);}
     async function save() {
@@ -95,12 +98,13 @@ export function ExpenseProvider({children}: {children: React.ReactNode}) {
                     <Text style={[s.label,{marginTop:18}]}>Kategoria</Text>
                     <View style={s.row}>{categories.map(c=><Pressable accessibilityRole="button" accessibilityState={{selected:categoryId===c.id}} disabled={busy} key={c.id} onPress={()=>setCategoryId(c.id)} style={[s.chip,categoryId===c.id&&s.chipActive]}><Text style={s.chipText}>{c.name}{c.kind==='fixed'?' · firmowe':''}</Text></Pressable>)}</View>
                     <Text style={[s.label,{marginTop:12}]}>Data wydatku</Text>
-                    <TextInput accessibilityLabel="Data wydatku" value={date} onChangeText={setDate} placeholder="DD.MM.RRRR" maxLength={10} editable={!busy} style={s.input}/>
-                    <View style={s.row}>{[0,1].map(offset=><Button key={offset} title={offset===0?'Dzisiaj':'Wczoraj'} secondary disabled={busy} onPress={()=>{const d=new Date();d.setDate(d.getDate()-offset);setDate(expenseDateLabel(dateKey(d)))}}/>)}</View>
+                    <TextInput accessibilityLabel="Data wydatku" value={date} onChangeText={text=>{setDate(text);setError('')}} onBlur={()=>setDateTouched(true)} placeholder="DD.MM.RRRR" maxLength={10} editable={!busy} aria-invalid={showDateError} accessibilityHint={showDateError?dateError||undefined:undefined} style={[s.input,showDateError&&{borderColor:colors.red}]}/>
+                    {showDateError&&<Text accessibilityRole="alert" style={styles.error}>{dateError}</Text>}
+                    <View style={s.row}>{[0,1].map(offset=><Button key={offset} title={offset===0?'Dzisiaj':'Wczoraj'} secondary disabled={busy} onPress={()=>{const d=new Date();d.setDate(d.getDate()-offset);setDate(expenseDateLabel(dateKey(d)));setDateTouched(false);setError('')}}/>)}</View>
                     <Text style={[s.label,{marginTop:16}]}>Opis (opcjonalnie)</Text>
                     <TextInput accessibilityLabel="Opis wydatku" value={note} onChangeText={setNote} placeholder="Np. zakupy na obiad" maxLength={500} editable={!busy} style={s.input}/>
                     {error?<Text accessibilityRole="alert" style={styles.error}>{error}</Text>:null}
-                    <Button title={busy?'Zapisywanie…':'Dodaj wydatek'} disabled={busy} onPress={()=>void save()}/>
+                    <Button title={busy?'Zapisywanie…':'Dodaj wydatek'} disabled={busy||!!dateError} onPress={()=>void save()}/>
                     <Text style={s.hint}>Kwota zostanie dodana do pozostałych wydatków w tej kategorii.</Text>
                 </>}
             </ScrollView>:<>

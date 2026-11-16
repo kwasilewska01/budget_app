@@ -177,3 +177,21 @@ test('Existing file-backed budgets are migrated without changing money or purcha
     await page.reload();await openFood(page);await expect(page.getByText('17,00 zł',{exact:true})).toBeVisible();
     await expect(page.getByText('Dawny zakup',{exact:true})).toBeVisible();
 });
+
+test('Impossible calendar dates show an immediate error and block adding a purchase',async({page})=>{
+    await openBudget(page);await page.getByLabel('Dodaj nowy wydatek',{exact:true}).click();
+    await page.getByLabel('Kwota nowego wydatku',{exact:true}).fill('12,34');
+    await page.getByRole('button',{name:'Jedzenie',exact:true}).click();
+    const date=page.getByLabel('Data wydatku',{exact:true});
+    const submit=page.getByRole('button',{name:'Dodaj wydatek',exact:true});
+    for(const [value,message] of [['31.02.2026','Luty 2026 ma 28 dni. Wybierz istniejącą datę.'],['29.02.2026','Luty 2026 ma 28 dni. Wybierz istniejącą datę.'],['31.04.2026','Kwiecień 2026 ma 30 dni. Wybierz istniejącą datę.']]){
+        await date.fill(value);await expect(page.getByText(message,{exact:true})).toBeVisible();await expect(submit).toBeDisabled();
+        await expect(date).toHaveAttribute('aria-invalid','true');
+    }
+    await date.fill('29.02.2024');await expect(submit).toBeEnabled();
+    await expect(page.getByText('Kwiecień 2026 ma 30 dni. Wybierz istniejącą datę.',{exact:true})).toHaveCount(0);
+    await submit.click();await expect(page.getByLabel('Kwota nowego wydatku',{exact:true})).toHaveCount(0);
+    await page.goto('/ustawienia');const waiting=page.waitForEvent('download');await page.getByRole('button',{name:'Pobierz kopię zapasową'}).click();
+    const backup=JSON.parse(await fs.readFile(await (await waiting).path(),'utf8'));
+    expect(backup.tables.expenses).toHaveLength(1);expect(backup.tables.expenses[0].spent_on).toBe('2024-02-29');
+});

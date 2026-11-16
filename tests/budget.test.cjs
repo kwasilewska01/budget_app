@@ -93,3 +93,12 @@ test('Kopiowanie planu nie ukrywa już zapisanych zakupów',async()=>{
  await api.copyPlan('2025-01','2025-02');assert.ok((await api.getMonthCategories('2025-02')).some(row=>row.id==='food'));assert.equal(domain.categoryTotals(c,await api.getActuals(),2025,1).actual,12.34);
  await api.copyPlan('2025-02','2025-02');assert.ok((await api.getMonthCategories('2025-02')).some(row=>row.id==='food'));
 });
+
+test('Daty wydatków respektują długości miesięcy i lata przestępne',()=>{
+ for(const value of ['31.02.2026','29.02.2026','31.04.2026','31.06.2026','31.09.2026','31.11.2026','00.01.2026','15.00.2026','15.13.2026','29.02.1900','29.02.2100','01.01.0000','1.2.2026',''])assert.throws(()=>domain.expenseDateFromInput(value),undefined,value);
+ for(const [input,iso] of [['28.02.2026','2026-02-28'],['29.02.2024','2024-02-29'],['29.02.2000','2000-02-29'],['30.04.2026','2026-04-30'],['31.12.2026','2026-12-31']])assert.equal(domain.expenseDateFromInput(input),iso);
+ assert.equal(domain.validExpenseDate('2026-02-31'),false);
+ assert.equal(domain.validExpenseDate('2100-02-29'),false);
+ assert.equal(domain.validExpenseDate('2000-02-29'),true);
+ assert.match(domain.expenseDateInputError('31.02.2026'),/Luty 2026 ma 28 dni/);
+});

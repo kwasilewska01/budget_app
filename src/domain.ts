@@ -76,16 +76,34 @@ export type Expense = {
     createdAt: string;
     note: string;
 };
-export function validExpenseDate(value: string) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-    const [y,m,d] = value.split('-').map(Number);
-    return y >= 1900 && dateKey(day(y,m-1,d)) === value;
+function calendarDaysInMonth(year:number,month:number){
+    const leap=year%4===0&&(year%100!==0||year%400===0);
+    return [31,leap?29:28,31,30,31,30,31,31,30,31,30,31][month-1]||0;
 }
-export function expenseDateFromInput(value: string) {
-    const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());
-    const iso = match ? `${match[3]}-${match[2]}-${match[1]}` : '';
-    if (!validExpenseDate(iso)) throw new Error('Wpisz poprawną datę w formacie DD.MM.RRRR.');
-    return iso;
+export function validExpenseDate(value:string){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+    const [year,month,date]=value.split('-').map(Number);
+    return year>=1900&&year<=9999&&month>=1&&month<=12&&date>=1&&date<=calendarDaysInMonth(year,month);
+}
+export function expenseDateInputError(value:string):string|null{
+    const match=/^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value.trim());
+    if(!match)return 'Wpisz pełną datę w formacie DD.MM.RRRR.';
+    const date=Number(match[1]),month=Number(match[2]),year=Number(match[3]);
+    if(year<1900)return 'Wpisz rok od 1900 do 9999.';
+    if(month<1||month>12)return 'Miesiąc musi być liczbą od 01 do 12.';
+    if(date<1)return 'Dzień miesiąca musi być większy od zera.';
+    const limit=calendarDaysInMonth(year,month);
+    if(date>limit){
+        const names=['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'];
+        return `${names[month-1]} ${year} ma ${limit} dni. Wybierz istniejącą datę.`;
+    }
+    return null;
+}
+export function expenseDateFromInput(value:string){
+    const error=expenseDateInputError(value);
+    if(error)throw new Error(error);
+    const [date,month,year]=value.trim().split('.');
+    return `${year}-${month}-${date}`;
 }
 export function expenseDateLabel(value: string) {
     const [y,m,d] = value.split('-');
