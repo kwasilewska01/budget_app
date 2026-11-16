@@ -37,7 +37,7 @@ export default function WebSettings(){
             <Text style={s.hint}>{pwa.offlineReady?'Gotowa do pracy bez internetu.':'Przy pierwszym otwarciu pozostań chwilę online, aby przygotować pracę bez internetu.'}</Text>
             {pwa.updateAvailable&&<Button title="Zaktualizuj aplikację" onPress={()=>void pwa.applyUpdate()}/>}
         </Card>
-        <Card><Text style={s.name}>Kopia zapasowa</Text><Text style={s.hint}>Pobierz plik i zachowaj go poza przeglądarką. Możesz też przywrócić kopię z aplikacji na telefonie. Plik zawiera kwoty i historię; nie jest zaszyfrowany.</Text>
+        <Card><Text style={s.name}>Kopia zapasowa</Text><Text style={s.hint}>Pobierz plik i zachowaj go poza przeglądarką. Możesz też przywrócić kopię z aplikacji na telefonie. Plik zawiera kwoty, cele i historię wpłat; nie jest zaszyfrowany.</Text>
             <Button title="Pobierz kopię zapasową" disabled={busy} onPress={()=>void backup()}/>
             <Button title="Przywróć kopię z pliku" secondary disabled={busy} onPress={()=>picker.current?.click()}/>
             <input ref={picker} type="file" accept=".json,application/json,text/plain" aria-label="Plik kopii budżetu" style={{display:'none'}} onChange={event=>{const file=event.target.files?.[0];if(file)void importFile(file)}}/>

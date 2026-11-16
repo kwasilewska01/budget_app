@@ -1,11 +1,13 @@
+import {useMoney} from './context';
 import {clearZeroOnFocus} from './number-input';
 import {Alert} from './alert';
 import React, {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react';
-import {ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
+import {ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {BottomSheet} from './bottom-sheet';
 import {addExpense, deleteExpense, getExpenseHistory} from './db';
 import {useBudget} from './context';
-import {Category, dateKey, Expense, expenseDateFromInput, expenseDateInputError, expenseDateLabel, money, numberFromInput, weekLabel} from './domain';
+import {Category, dateKey, Expense, expenseDateFromInput, expenseDateInputError, expenseDateLabel, numberFromInput, weekLabel} from './domain';
 import {Button, colors, s} from './ui';
 
 type HistoryRequest = {category: Category; period: string};
@@ -17,20 +19,8 @@ export function useExpenses() {
     return value;
 }
 const newId = () => `expense-${Date.now()}-${Math.random().toString(36).slice(2,11)}`;
-function BottomSheet({visible, title, onClose, children}: {visible: boolean; title: string; onClose: () => void; children: React.ReactNode}) {
-    const insets = useSafeAreaInsets();
-    return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <KeyboardAvoidingView style={styles.overlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-            <Pressable accessibilityRole="button" accessibilityLabel="Zamknij panel" style={StyleSheet.absoluteFill} onPress={onClose}/>
-            <View accessibilityViewIsModal style={[styles.sheet, {paddingBottom: Math.max(16,insets.bottom)}]}>
-                <View style={styles.handle}/>
-                <View style={styles.heading}><Text accessibilityRole="header" style={[s.title,{flex:1,marginBottom:0}]}>{title}</Text><Pressable accessibilityRole="button" accessibilityLabel="Zamknij" hitSlop={12} onPress={onClose}><Text style={styles.close}>×</Text></Pressable></View>
-                {children}
-            </View>
-        </KeyboardAvoidingView>
-    </Modal>;
-}
 export function ExpenseProvider({children}: {children: React.ReactNode}) {
+    const {money,unit}=useMoney();
     const {categories} = useBudget();
     const insets=useSafeAreaInsets();
     const [notice,setNotice]=useState('');
@@ -93,7 +83,7 @@ export function ExpenseProvider({children}: {children: React.ReactNode}) {
         <BottomSheet visible={composer||!!history} title={composer?'Dodaj wydatek':history?.category.name || 'Historia wydatków'} onClose={()=>{if(composer)closeComposer();else if(!deletingRef.current)setHistory(null)}}>
             {composer?<ScrollView style={{flexShrink:1}} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingBottom:12}}>
                 {categories.length===0?<Text style={s.hint}>Najpierw dodaj kategorię w Konfiguratorze.</Text>:<>
-                    <Text style={s.label}>Kwota (zł)</Text>
+                    <Text style={s.label}>{`Kwota (${unit})`}</Text>
                     <TextInput autoFocus accessibilityLabel="Kwota nowego wydatku" value={amount} onChangeText={setAmount} onFocus={()=>setAmount(clearZeroOnFocus)} keyboardType="decimal-pad" placeholder="0,00" editable={!busy} style={[s.input,styles.amountInput]}/>
                     <Text style={[s.label,{marginTop:18}]}>Kategoria</Text>
                     <View style={s.row}>{categories.map(c=><Pressable accessibilityRole="button" accessibilityState={{selected:categoryId===c.id}} disabled={busy} key={c.id} onPress={()=>setCategoryId(c.id)} style={[s.chip,categoryId===c.id&&s.chipActive]}><Text style={s.chipText}>{c.name}{c.kind==='fixed'?' · firmowe':''}</Text></Pressable>)}</View>
@@ -124,11 +114,6 @@ export function ExpenseProvider({children}: {children: React.ReactNode}) {
 }
 const styles=StyleSheet.create({
     notice:{position:'absolute',left:16,right:16,zIndex:10,backgroundColor:colors.green,padding:14,borderRadius:12},
-    overlay:{flex:1,justifyContent:'flex-end',backgroundColor:'rgba(15,23,42,0.45)'},
-    sheet:{maxHeight:'90%',backgroundColor:'white',borderTopLeftRadius:24,borderTopRightRadius:24,paddingHorizontal:20,paddingTop:10},
-    handle:{width:40,height:5,borderRadius:3,backgroundColor:'#cbd5de',alignSelf:'center',marginBottom:16},
-    heading:{flexDirection:'row',alignItems:'center',gap:12,marginBottom:18},
-    close:{fontSize:30,color:colors.muted,lineHeight:32},
     amountInput:{fontSize:32,fontWeight:'700',paddingVertical:16},
     error:{color:colors.red,marginTop:12},
     totalRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:12,paddingVertical:14},

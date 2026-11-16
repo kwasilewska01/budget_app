@@ -27,7 +27,9 @@ export function weekOverlap(key: string, y: number, m: number) { const [a, b, c]
         count++;
 } return count; }
 export function weekLabel(key: string) { const [y, m, d] = key.split('-').map(Number); const start = day(y, m - 1, d), end = day(y, m - 1, d + 6); const fmt = (v: Date) => `${String(v.getDate()).padStart(2, '0')}.${String(v.getMonth() + 1).padStart(2, '0')}`; return `${fmt(start)}–${fmt(end)}`; }
-export const money = (n: number) => `${n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} zł`;
+export function normalizeCurrency(value:string){const clean=value.trim();if(!clean||clean.length>20||/[\u0000-\u001f\u007f]/.test(clean))throw new Error('Wpisz walutę (od 1 do 20 znaków).');return clean;}
+export const currencyLabel = (currency:string) => currency.toUpperCase()==='PLN'?'zł':currency;
+export const money = (n: number, currency='PLN') => `${n.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyLabel(currency)}`;
 export function numberFromInput(v: string) { const normalized = v.trim().replace(/\s/g, '').replace(',', '.'); if (!/^(\d+(\.\d{0,2})?|\.\d{1,2})?$/.test(normalized))
     throw new Error('Wpisz dodatnią kwotę z maksymalnie dwoma miejscami po przecinku'); const n = Number(normalized); if (!Number.isFinite(n) || n > 1e10)
     throw new Error('Kwota poza zakresem'); return Math.round(n * 100) / 100; }
@@ -50,7 +52,7 @@ export function categoryTotals(c: Category, actuals: Record<string, number>, y: 
     const actual = weeks.reduce((sum, k) => sum + weeklyCents(actuals[`${c.id}:${k}`] || 0, k, y, m), 0) + Math.round((actuals[`${c.id}:${monthKey(y, m)}`] || 0) * 100) + Math.round((actuals[`${c.id}:dated:${monthKey(y,m)}`] || 0) * 100);
     return { plan: plan / 100, actual: actual / 100 };
 }
-export function totals(categories: Category[], data: MonthData, actuals: Record<string, number>, y: number, m: number) {
+export function totals(categories: Category[], data: MonthData, actuals: Record<string, number>, y: number, m: number, goalSavings=0) {
     let dailyPlan = 0, fixedPlan = 0, dailyActual = 0, fixedActual = 0, expected = 0;
     for (const c of categories) {
         const t = categoryTotals(c, actuals, y, m), plan = Math.round(t.plan * 100), actual = Math.round(t.actual * 100);
@@ -64,7 +66,7 @@ export function totals(categories: Category[], data: MonthData, actuals: Record<
             fixedActual += actual;
         }
     }
-    const available = Math.round(data.salary * 100) - Math.round(data.unplanned * 100) - Math.round(data.reserve * 100) - Math.round(data.savings * 100);
+    const available = Math.round(data.salary * 100) - Math.round(data.unplanned * 100) - Math.round(data.reserve * 100) - Math.round(data.savings * 100) - Math.round(goalSavings*100);
     return { dailyPlan: dailyPlan / 100, fixedPlan: fixedPlan / 100, dailyActual: dailyActual / 100, fixedActual: fixedActual / 100, planned: (dailyPlan + fixedPlan) / 100, forecast: (available - expected) / 100, remaining: (available - dailyActual - fixedActual) / 100 };
 }
 
@@ -108,4 +110,27 @@ export function expenseDateFromInput(value:string){
 export function expenseDateLabel(value: string) {
     const [y,m,d] = value.split('-');
     return `${d}.${m}.${y}`;
+}
+
+export type SavingsGoal = {
+    id:string;
+    name:string;
+    target:number;
+    createdAt:string;
+    archived:boolean;
+    saved:number;
+    monthly:number;
+    contributionCount:number;
+};
+export type GoalContribution = {
+    id:string;
+    goalId:string;
+    amount:number;
+    paidOn:string;
+    createdAt:string;
+    note:string;
+};
+export function goalProgress(saved:number,target:number){
+    const savedCents=Math.round(saved*100),targetCents=Math.round(target*100);
+    return {remaining:Math.max(0,targetCents-savedCents)/100,percentage:targetCents>0?Math.min(100,Math.round(savedCents/targetCents*1000)/10):0,completed:targetCents>0&&savedCents>=targetCents};
 }

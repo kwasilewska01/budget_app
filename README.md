@@ -94,7 +94,7 @@ Testy: `npm test` (Node.js 22.13+ z modułem `node:sqlite`), kontrola typów: `n
 - Każdy zakup jest osobnym wpisem w SQLite. Kolejne wpisy zwiększają sumę; nie edytuje się zbiorczej kwoty. Przycisk zapisu blokuje wielokrotne kliknięcia, a identyfikator operacji chroni przed podwójnym zapisem przy ponowieniu.
 - W zakładce Wydatki dotknięcie kategorii otwiera dolny panel z datami zakupów, kwotami, opisami i czasem dodania. Z panelu można dodać kolejny zakup lub usunąć błędny wpis po potwierdzeniu.
 - Nowe zakupy trafiają w całości do miesiąca daty zakupu. Dotychczasowe sumy tygodniowe zachowują poprzedni sposób podziału między miesiące; są widoczne w historii jako wcześniejsze kwoty zbiorcze bez wymyślonych dat zakupów.
-- Kopie zapasowe w formacie 3 zawierają zakupy. Można też przywrócić format 2 (zawiera tylko dawne sumy). Przywrócenie zastępuje cały budżet.
+- Kopie zapasowe w formacie 4 zawierają zakupy, cele i wpłaty. Można też przywrócić formaty 2 i 3. Przywrócenie zastępuje cały budżet, w tym cele.
 
 ## Zgodność z Expo Go
 
@@ -137,3 +137,17 @@ Testy PWA: `npm run test:web` po `npm run build:web`. Na Macu testy korzystają 
 Po wejściu w pole kwoty wartość zero znika, żeby można było od razu wpisać liczbę. Pozostawienie pustego pola przywraca zero. Niezerowe kwoty i tekstowe nazwy nie są czyszczone.
 
 Zapis PWA jest potwierdzany dopiero po zakończeniu transakcji IndexedDB. Nieudany zapis wycofuje zmiany w pamięci, więc ponowienie nie dubluje zakupów. Dodatkowe testy przeglądarkowe zamykają uchwyty OPFS, symulują odmowę zapisu, sprawdzają migrację istniejącego budżetu i edycję zerowych kwot.
+
+## Cele oszczędnościowe
+
+W dolnym menu otwórz **Cele** i wybierz **Utwórz cel**. Podaj nazwę, np. „Nowy samochód”, oraz docelową kwotę, np. 40 000 zł. Można prowadzić kilka niezależnych celów.
+
+- Każda wpłata ma własną kwotę, datę i opcjonalny opis. Kilka wpłat w tym samym miesiącu sumuje się.
+- Postęp obejmuje wszystkie wpłaty, niezależnie od wybranego miesiąca. Ekran pokazuje zebrane środki, procent, kwotę pozostałą do celu i status osiągnięcia celu.
+- Miesiąc na górze ekranu służy do sprawdzenia, ile odłożono w danym okresie. W historii wpłaty są grupowane według miesięcy.
+- Wpłaty automatycznie zmniejszają saldo i prognozę budżetu miesiąca wskazanego datą. Pole **Oszczędności poza celami** jest przeznaczone wyłącznie na inne oszczędności — nie wpisuj tam ponownie wpłat na cele.
+- Można edytować nazwę i kwotę celu. Archiwizacja ukrywa cel z aktywnej listy, zachowując wszystkie wpłaty i rozliczenia. Cel można przywrócić z archiwum.
+- Błędną wpłatę można usunąć po potwierdzeniu; zebrana suma i budżet danego miesiąca przeliczają się automatycznie.
+- Cele i wpłaty działają offline w PWA oraz są częścią lokalnych kopii JSON w formacie 4. Starsze kopie (2/3) nadal można przywrócić, ale nie zawierają celów. Przed przenoszeniem kopii w formacie 4 zaktualizuj aplikację docelową.
+
+W konfiguratorze pole **Waluta** domyślnie ma wartość PLN. Można wpisać własne oznaczenie (do 20 znaków), używane w całym budżecie, wydatkach i celach. Zmiana nie przelicza kwot. Ustawienie jest zapisywane lokalnie oraz w kopii zapasowej.

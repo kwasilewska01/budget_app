@@ -84,7 +84,7 @@ test('Historia ma daty, opisy i kolejność; usunięcie koryguje sumę',async()=
 });
 test('Kopia zachowuje pojedyncze zakupy i pozwala odtworzyć starszy format',async()=>{
  const {api}=database();await api.initDb();await api.saveCategory(c);await api.addExpense(expense('backup',12.34));const text=await api.exportBackup();
- assert.equal(JSON.parse(text).version,3);await api.deleteExpense('backup');await api.restoreBackup(text);assert.equal((await api.getExpenseHistory('food','2026-11')).entries.length,1);
+ assert.equal(JSON.parse(text).version,4);await api.deleteExpense('backup');await api.restoreBackup(text);assert.equal((await api.getExpenseHistory('food','2026-11')).entries.length,1);
  const invalid=JSON.parse(text);invalid.tables.expenses[0].spent_on='2026-02-30';await assert.rejects(api.restoreBackup(JSON.stringify(invalid)));assert.equal((await api.getExpenseHistory('food','2026-11')).entries.length,1);
  const old=JSON.parse(text);old.version=2;delete old.tables.expenses;await api.restoreBackup(JSON.stringify(old));assert.equal((await api.getExpenseHistory('food','2026-11')).entries.length,0);assert.ok((await api.getCategories()).some(row=>row.id==='food'));
 });
@@ -101,4 +101,52 @@ test('Daty wydatków respektują długości miesięcy i lata przestępne',()=>{
  assert.equal(domain.validExpenseDate('2100-02-29'),false);
  assert.equal(domain.validExpenseDate('2000-02-29'),true);
  assert.match(domain.expenseDateInputError('31.02.2026'),/Luty 2026 ma 28 dni/);
+});
+
+const goal=(id='car',target=40000)=>({id,name:id==='car'?'Nowy samochód':`Cel ${id}`,target,createdAt:'2026-11-16T10:00:00.000Z'});
+const contribution=(id,amount,paidOn='2026-11-16',goalId='car')=>({id,goalId,amount,paidOn,createdAt:'2026-11-16T12:00:00.000Z',note:''});
+test('Cele sumują kolejne wpłaty, rozdzielają miesiące i przechowują całkowite grosze',async()=>{
+ const {api,raw}=database();await api.initDb();await api.createGoal(goal());
+ await api.addGoalContribution(contribution('nov',2000));await api.addGoalContribution(contribution('dec',1500,'2026-12-15'));await api.addGoalContribution(contribution('cents',0.13));
+ const [saved]=await api.getGoals('2026-11');assert.equal(saved.target,40000);assert.equal(saved.saved,3500.13);assert.equal(saved.monthly,2000.13);assert.equal(saved.contributionCount,3);
+ assert.equal(await api.getMonthGoalSavings('2026-11'),2000.13);assert.equal(await api.getMonthGoalSavings('2026-12'),1500);
+ assert.equal(raw.prepare('SELECT SUM(amount) AS total FROM goal_contributions').get().total,350013);
+ assert.deepEqual((await api.getGoalContributions('car')).map(row=>row.id),['dec','nov','cents']);
+ assert.equal(domain.goalProgress(saved.saved,saved.target).remaining,36499.87);
+});
+test('Wpłaty na cele zmniejszają saldo bez dublowania pola innych oszczędności',()=>{
+ const t=domain.totals([],{salary:10000,unplanned:100,reserve:200,savings:500},{},2026,10,2000.15);
+ assert.equal(t.remaining,7199.85);assert.equal(t.forecast,7199.85);
+ assert.deepEqual(domain.goalProgress(40000,40000),{remaining:0,percentage:100,completed:true});assert.deepEqual(domain.goalProgress(41000,40000),{remaining:0,percentage:100,completed:true});
+});
+test('Edycja i archiwizacja celu zachowują historię i rozliczenia miesięcy',async()=>{
+ const {api}=database();await api.initDb();await api.createGoal(goal());await api.addGoalContribution(contribution('first',2000));
+ await api.updateGoal('car','Samochód rodzinny',1500);let [item]=await api.getGoals('2026-11');assert.equal(item.name,'Samochód rodzinny');assert.equal(item.saved,2000);assert.equal(domain.goalProgress(item.saved,item.target).completed,true);
+ await api.setGoalArchived('car',true);assert.equal((await api.getGoals('2026-11')).length,0);assert.equal((await api.getGoals('2026-11',true))[0].archived,true);assert.equal(await api.getMonthGoalSavings('2026-11'),2000);
+ await assert.rejects(api.addGoalContribution(contribution('archived',100)));await api.setGoalArchived('car',false);assert.equal((await api.getGoalContributions('car')).length,1);
+ await api.deleteGoalContribution('first');assert.equal(await api.getMonthGoalSavings('2026-11'),0);assert.equal((await api.getGoals('2026-11'))[0].saved,0);
+});
+test('Walidacja i ponowienie wpłat zapobiegają duplikatom i błędnym kwotom',async()=>{
+ const {api}=database();await api.initDb();await api.createGoal(goal());await api.createGoal(goal());
+ await assert.rejects(api.createGoal({...goal('duplicate'),name:'nowy samochód'}));await assert.rejects(api.createGoal(goal('zero',0)));
+ await Promise.all([api.addGoalContribution(contribution('same',100.01)),api.addGoalContribution(contribution('same',100.01))]);assert.equal(await api.getMonthGoalSavings('2026-11'),100.01);
+ for(const item of [contribution('bad-date',10,'2026-02-31'),contribution('zero',0),contribution('negative',-10),contribution('fractions',1.001),contribution('missing',10,'2026-11-16','missing')])await assert.rejects(api.addGoalContribution(item));
+ await assert.rejects(api.addGoalContribution(contribution('same',150)));assert.equal((await api.getGoalContributions('car')).length,1);
+});
+test('Kopie zapasowe zachowują cele i wpłaty oraz przyjmują wcześniejsze wersje',async()=>{
+ const {api}=database();await api.initDb();await api.createGoal(goal());await api.addGoalContribution(contribution('saved',123.45));const backup=await api.exportBackup();
+ const data=JSON.parse(backup);assert.equal(data.version,4);assert.equal(data.tables.goals[0].target,4000000);assert.equal(data.tables.goal_contributions[0].amount,12345);
+ await api.deleteGoalContribution('saved');await api.restoreBackup(backup);assert.equal((await api.getGoals('2026-11'))[0].saved,123.45);
+ const orphan=JSON.parse(backup);orphan.tables.goal_contributions[0].goal_id='missing';await assert.rejects(api.restoreBackup(JSON.stringify(orphan)));assert.equal((await api.getGoals('2026-11'))[0].saved,123.45);
+ const badDate=JSON.parse(backup);badDate.tables.goal_contributions[0].paid_on='2026-02-31';await assert.rejects(api.restoreBackup(JSON.stringify(badDate)));
+ for(const version of [2,3]){const old=JSON.parse(backup);old.version=version;delete old.tables.goals;delete old.tables.goal_contributions;if(version===2)delete old.tables.expenses;await api.restoreBackup(JSON.stringify(old));assert.equal((await api.getGoals('2026-11')).length,0)}
+});
+test('Własna waluta jest trwała, zachowana w kopii i nie przelicza kwot',async()=>{
+ const {api}=database();await api.initDb();assert.equal(await api.getCurrency(),'PLN');
+ await api.saveMonthField('2026-11','salary',1234.56);await api.saveCurrency(' EUR ');
+ assert.equal(await api.getCurrency(),'EUR');assert.equal((await api.getMonth('2026-11')).salary,1234.56);
+ const backup=await api.exportBackup();await api.saveCurrency('punkty');await api.restoreBackup(backup);assert.equal(await api.getCurrency(),'EUR');
+ for(const value of ['','  ','x'.repeat(21),'USD\nEUR'])await assert.rejects(()=>api.saveCurrency(value));
+ assert.equal(domain.money(12.34,'punkty'),'12,34 punkty');assert.equal(domain.money(12.34),'12,34 zł');
+ const legacy=JSON.parse(backup);legacy.version=3;delete legacy.tables.preferences;await api.restoreBackup(JSON.stringify(legacy));assert.equal(await api.getCurrency(),'PLN');
 });

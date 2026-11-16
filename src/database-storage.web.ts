@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 
 const storeName='snapshots';
 const snapshotKey='moj-budzet';
-const tableNames=new Set(['categories','months','actuals','app_meta','month_plans','plan_months','expenses']);
+const tableNames=new Set(['categories','months','actuals','app_meta','month_plans','plan_months','expenses','goals','goal_contributions','preferences']);
 type Row=Record<string,SQLite.SQLiteBindValue>;
 type Snapshot={version:1;tables:{name:string;sql:string;rows:Row[]}[];indexes:string[]};
 let storage:Promise<IDBDatabase>|undefined;

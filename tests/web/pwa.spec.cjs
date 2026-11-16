@@ -195,3 +195,76 @@ test('Impossible calendar dates show an immediate error and block adding a purch
     const backup=JSON.parse(await fs.readFile(await (await waiting).path(),'utf8'));
     expect(backup.tables.expenses).toHaveLength(1);expect(backup.tables.expenses[0].spent_on).toBe('2024-02-29');
 });
+
+async function createSavingGoal(page,name='Nowy samochód',target='40000'){
+    await page.goto('/cele');await expect(page.getByText('Cele oszczędnościowe',{exact:true}).last()).toBeVisible();
+    await page.getByRole('button',{name:'＋ Utwórz cel',exact:true}).click();
+    await page.getByLabel('Nazwa celu',{exact:true}).fill(name);await page.getByLabel('Kwota celu (zł)',{exact:true}).fill(target);
+    await page.getByRole('button',{name:'Utwórz cel',exact:true}).click();
+    await expect(page.getByRole('button',{name:'Dodaj wpłatę',exact:true})).toBeVisible();
+}
+async function contributeToGoal(page,amount,date,note){
+    await page.getByLabel('Kwota wpłaty (zł)',{exact:true}).fill(amount);await page.getByLabel('Data wpłaty',{exact:true}).fill(date);await page.getByLabel('Opis wpłaty',{exact:true}).fill(note);
+    await page.getByRole('button',{name:'Dodaj wpłatę',exact:true}).click();await expect(page.getByText(note,{exact:true})).toBeVisible();
+}
+function goalTestDates(){
+    const now=new Date(),next=new Date(now.getFullYear(),now.getMonth()+1,15);
+    const format=d=>`${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+    return {current:format(new Date(now.getFullYear(),now.getMonth(),15)),next:format(next)};
+}
+test('Savings goals track monthly contributions, update the budget and persist offline',async({page,context})=>{
+    const dates=goalTestDates();await createSavingGoal(page);
+    await contributeToGoal(page,'2000',dates.current,'Wpłata z tego miesiąca');await contributeToGoal(page,'1500',dates.next,'Wpłata z kolejnego miesiąca');
+    await expect(page.getByRole('progressbar',{name:'Postęp celu Nowy samochód'}).last()).toHaveAttribute('aria-valuenow','8.8');
+    await expect(page.getByText('Pozostało 36 500,00 zł',{exact:true}).last()).toBeVisible();
+    await page.screenshot({path:'test-results/goal-contributions.png',fullPage:true});
+    await page.getByRole('button',{name:'Zamknij',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.goto('/');
+    const salary=page.getByLabel('Wynagrodzenie netto (zł)',{exact:true});await salary.focus();await salary.pressSequentially('10000');await salary.blur();
+    await expect(page.getByText(/^8\s?000,00 zł$/).first()).toBeVisible();
+    const otherSavings=page.getByLabel('Oszczędności poza celami (zł)',{exact:true});await otherSavings.fill('150');await otherSavings.blur();
+    await expect(page.getByText(/^7\s?850,00 zł$/).first()).toBeVisible();
+    await page.goto('/ustawienia');const pending=page.waitForEvent('download');await page.getByRole('button',{name:'Pobierz kopię zapasową'}).click();
+    const backup=JSON.parse(await fs.readFile(await(await pending).path(),'utf8'));expect(backup.version).toBe(4);expect(backup.tables.goals).toHaveLength(1);expect(backup.tables.goal_contributions).toHaveLength(2);
+    await page.waitForFunction(()=>navigator.serviceWorker.controller!==null);await context.setOffline(true);await page.goto('/cele');
+    await page.getByRole('button',{name:'Cel Nowy samochód. Pokaż postęp i wpłaty',exact:true}).click();
+    await expect(page.getByText('Wpłata z tego miesiąca',{exact:true})).toBeVisible();await expect(page.getByText('Wpłata z kolejnego miesiąca',{exact:true})).toBeVisible();
+    await expect(page.getByRole('progressbar',{name:'Postęp celu Nowy samochód'}).last()).toHaveAttribute('aria-valuenow','8.8');
+});
+test('Goal editing, invalid contribution dates and archiving preserve the ledger',async({page})=>{
+    page.on('dialog',dialog=>dialog.accept());const dates=goalTestDates();await createSavingGoal(page);
+    const date=page.getByLabel('Data wpłaty',{exact:true});await date.fill('31.02.2026');await expect(page.getByRole('button',{name:'Dodaj wpłatę',exact:true})).toBeDisabled();
+    await expect(page.getByText('Luty 2026 ma 28 dni. Wybierz istniejącą datę.',{exact:true})).toBeVisible();
+    await contributeToGoal(page,'2000',dates.current,'Do zachowania w historii');
+    await page.getByRole('button',{name:'Edytuj cel',exact:true}).click();await page.getByLabel('Nazwa celu',{exact:true}).fill('Samochód rodzinny');await page.getByLabel('Kwota celu (zł)',{exact:true}).fill('1500');await page.getByRole('button',{name:'Zapisz cel',exact:true}).click();
+    await expect(page.getByText('Cel osiągnięty ✓',{exact:true}).last()).toBeVisible();
+    await page.getByRole('button',{name:'Archiwizuj cel',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'Cel Samochód rodzinny. Pokaż postęp i wpłaty',exact:true})).toHaveCount(0);
+    await expect(page.getByText(/^2\s?000,00 zł$/)).toBeVisible();
+    await page.getByRole('button',{name:'Pokaż archiwalne cele',exact:true}).click();await page.getByRole('button',{name:'Cel Samochód rodzinny. Pokaż postęp i wpłaty',exact:true}).click();
+    await expect(page.getByText('Do zachowania w historii',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Dodaj wpłatę',exact:true})).toHaveCount(0);
+    await page.getByRole('button',{name:'Przywróć cel',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.getByRole('button',{name:'Cel Samochód rodzinny. Pokaż postęp i wpłaty',exact:true}).click();await expect(page.getByRole('button',{name:'Dodaj wpłatę',exact:true})).toBeVisible();
+    await page.getByRole('button',{name:/Usuń wpłatę 2\s?000,00 zł/}).click();await expect(page.getByText('Do zachowania w historii',{exact:true})).toHaveCount(0);
+    await expect(page.getByRole('progressbar',{name:'Postęp celu Samochód rodzinny'}).last()).toHaveAttribute('aria-valuenow','0');
+    await page.getByRole('button',{name:'Zamknij',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByText('0,00 zł',{exact:true})).toBeVisible();
+});
+test('Custom currency updates budget, goals and expense labels and survives reload',async({page})=>{
+ await openBudget(page);
+ await page.getByLabel('Wynagrodzenie netto (zł)',{exact:true}).fill('1234');
+ await page.getByText('Podsumowanie miesiąca',{exact:true}).click();
+ await expect(page.getByText(/^1\s?234,00 zł$/).first()).toBeVisible();
+ await page.goto('/konfigurator');
+ await expect(page.getByLabel('Waluta',{exact:true})).toHaveValue('PLN');
+ await page.getByLabel('Waluta',{exact:true}).fill('punkty');
+ await page.getByText('Waluta budżetu',{exact:true}).click();
+ await expect(page.getByLabel('Plan (punkty)').first()).toBeVisible();
+ await page.reload();await expect(page.getByLabel('Waluta',{exact:true})).toHaveValue('punkty');
+ await page.goto('/');
+ await expect(page.getByLabel('Wynagrodzenie netto (punkty)',{exact:true})).toHaveValue('1234');
+ await expect(page.getByText(/^1\s?234,00 punkty$/).first()).toBeVisible();
+ await page.goto('/cele');
+ await page.getByRole('button',{name:'＋ Utwórz cel',exact:true}).click();
+ await expect(page.getByLabel('Kwota celu (punkty)',{exact:true})).toBeVisible();
+});

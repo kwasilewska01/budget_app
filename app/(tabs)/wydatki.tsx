@@ -1,11 +1,13 @@
+import {useMoney} from '../../src/context';
 import React,{useCallback,useState} from 'react';
 import {ActivityIndicator,Pressable,ScrollView,Text,View} from 'react-native';
 import {useFocusEffect} from 'expo-router';
 import {getActuals,getMonthCategories} from '../../src/db';
-import {Category,categoryTotals,money,monthKey} from '../../src/domain';
+import {Category,categoryTotals,monthKey} from '../../src/domain';
 import {useExpenses} from '../../src/expenses';
 import {Button,Card,colors,s} from '../../src/ui';
 export default function Expenses(){
+    const {money,unit}=useMoney();
     const now=new Date();
     const [year,setYear]=useState(now.getFullYear()),[month,setMonth]=useState(now.getMonth());
     const [categories,setCategories]=useState<Category[]>([]),[actuals,setActuals]=useState<Record<string,number>>({});

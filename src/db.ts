@@ -1,7 +1,8 @@
+import {normalizeCurrency} from './domain';
 import * as SQLite from 'expo-sqlite';
 import {Platform} from 'react-native';
 import {openBudgetDatabase,persistBudgetDatabase,recoverBudgetDatabase} from './database-storage';
-import { Category, Expense, MonthData, emptyMonth, validExpenseDate, weeklyCents } from './domain';
+import { Category, Expense, SavingsGoal, GoalContribution, MonthData, emptyMonth, validExpenseDate, weeklyCents } from './domain';
 let db: SQLite.SQLiteDatabase;
 let initialization: Promise<void> | undefined;
 let releaseBrowserLock:(()=>void)|undefined;
@@ -37,6 +38,7 @@ async function initialize() {
     db = await openBudgetDatabase();
     await db.execAsync(Platform.OS==='web'?'PRAGMA journal_mode = DELETE;':'PRAGMA journal_mode = WAL;');
     await db.execAsync(`
+ CREATE TABLE IF NOT EXISTS preferences(key TEXT PRIMARY KEY,value TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS categories(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,plan REAL NOT NULL DEFAULT 0,frequency TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS months(key TEXT PRIMARY KEY,salary REAL NOT NULL DEFAULT 0,unplanned REAL NOT NULL DEFAULT 0,reserve REAL NOT NULL DEFAULT 0,savings REAL NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS actuals(category_id TEXT NOT NULL,period_key TEXT NOT NULL,amount REAL NOT NULL DEFAULT 0,PRIMARY KEY(category_id,period_key));`);
@@ -62,6 +64,10 @@ async function initialize() {
     await db.execAsync(`CREATE TABLE IF NOT EXISTS month_plans(period TEXT NOT NULL,id TEXT NOT NULL,name TEXT NOT NULL,kind TEXT NOT NULL,plan REAL NOT NULL,frequency TEXT NOT NULL,PRIMARY KEY(period,id)); CREATE TABLE IF NOT EXISTS plan_months(period TEXT PRIMARY KEY);`);
     await db.execAsync(`CREATE TABLE IF NOT EXISTS expenses(id TEXT PRIMARY KEY,category_id TEXT NOT NULL,amount INTEGER NOT NULL CHECK(amount>0),spent_on TEXT NOT NULL,created_at TEXT NOT NULL,note TEXT NOT NULL DEFAULT '');
     CREATE INDEX IF NOT EXISTS expenses_category_date ON expenses(category_id,spent_on,created_at);`);
+    await db.execAsync(`CREATE TABLE IF NOT EXISTS goals(id TEXT PRIMARY KEY,name TEXT NOT NULL,target INTEGER NOT NULL CHECK(target>0),created_at TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS goal_contributions(id TEXT PRIMARY KEY,goal_id TEXT NOT NULL,amount INTEGER NOT NULL CHECK(amount>0),paid_on TEXT NOT NULL,created_at TEXT NOT NULL,note TEXT NOT NULL DEFAULT '');
+    CREATE INDEX IF NOT EXISTS goal_contributions_goal_date ON goal_contributions(goal_id,paid_on,created_at);
+    CREATE INDEX IF NOT EXISTS goal_contributions_date ON goal_contributions(paid_on);`);
     // Preserve every known historical period before category defaults can change.
     const periods = await db.getAllAsync<{
         period: string;
@@ -138,29 +144,34 @@ async function saveMonthFieldImpl(period: string, field: keyof MonthData, amount
         throw new Error('Nieznane pole');
     await db.runAsync(`INSERT INTO months(key,${field}) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET ${field}=excluded.${field}`, period, Math.round(amount * 100));
 }
-const backupTables = ['categories', 'months', 'actuals', 'month_plans', 'plan_months', 'expenses'] as const;
+const backupTables = ['categories', 'months', 'actuals', 'month_plans', 'plan_months', 'expenses', 'goals', 'goal_contributions', 'preferences'] as const;
 async function exportBackupImpl() {
     const tables: Record<string, unknown[]> = {};
     await withTransaction(async (tx) => { for (const table of backupTables)
         tables[table] = await tx.getAllAsync(`SELECT * FROM ${table}`); });
-    return JSON.stringify({ format: 'moj-budzet', version: 3, createdAt: new Date().toISOString(), tables }, null, 2);
+    return JSON.stringify({ format: 'moj-budzet', version: 4, createdAt: new Date().toISOString(), tables }, null, 2);
 }
 export function validateBackup(text: string) {
     const b = JSON.parse(text);
-    if (b?.format !== 'moj-budzet' || ![2,3].includes(b.version) || !b.tables)
+    if (b?.format !== 'moj-budzet' || ![2,3,4].includes(b.version) || !b.tables)
         throw new Error('Nieobsługiwany format kopii');
     if(b.version===2)b.tables.expenses=[];
+    if(b.version<4){b.tables.goals=[];b.tables.goal_contributions=[];}
+    if(b.tables.preferences===undefined)b.tables.preferences=[];
     const schemas: Record<string, Record<string, (v: unknown) => boolean>> = {};
     const str = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length < 1000;
     const amount = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1e12 && Number.isSafeInteger(v);
     const period = (v: unknown) => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
     const category = { id: str, name: str, kind: (v: unknown) => v === 'daily' || v === 'fixed', plan: amount, frequency: (v: unknown) => v === 'month' || v === 'week' };
+    schemas.preferences={key:v=>v==='currency',value:v=>{try{return typeof v==='string'&&normalizeCurrency(v)===v}catch{return false}}};
     schemas.categories = { ...category, archived: v => v === 0 || v === 1 };
     schemas.months = { key: period, salary: amount, unplanned: amount, reserve: amount, savings: amount };
     schemas.actuals = { category_id: str, period_key: v => typeof v === 'string' && /^\d{4}-(0[1-9]|1[0-2])(-\d{2})?$/.test(v), amount };
     schemas.month_plans = { period, ...category };
     schemas.plan_months = { period };
     schemas.expenses={id:str,category_id:str,amount:v=>amount(v)&&Number(v)>0,spent_on:v=>typeof v==='string'&&validExpenseDate(v),created_at:v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(v)&&Number.isFinite(Date.parse(v)),note:v=>typeof v==='string'&&v.length<=500};
+    schemas.goals={id:str,name:str,target:v=>amount(v)&&Number(v)>0,created_at:v=>typeof v==='string'&&Number.isFinite(Date.parse(v)),archived:v=>v===0||v===1};
+    schemas.goal_contributions={id:str,goal_id:str,amount:v=>amount(v)&&Number(v)>0,paid_on:v=>typeof v==='string'&&validExpenseDate(v),created_at:v=>typeof v==='string'&&Number.isFinite(Date.parse(v)),note:v=>typeof v==='string'&&v.length<=500};
     for (const table of backupTables) {
         const rows = b.tables[table];
         if (!Array.isArray(rows) || rows.length > 100000)
@@ -170,6 +181,8 @@ export function validateBackup(text: string) {
                 throw new Error('Nieprawidłowe dane kopii');
         }
     }
+    const goalIds=new Set(b.tables.goals.map((goal:{id:string})=>goal.id));
+    if(b.tables.goal_contributions.some((entry:{goal_id:string})=>!goalIds.has(entry.goal_id)))throw new Error('Brak celu dla zapisanej wpłaty');
     const ids = new Set(b.tables.categories.map((r: Category) => r.id));
     if (b.tables.actuals.some((r: {
         category_id: string;
@@ -287,3 +300,72 @@ async function undoLastRestoreImpl(){
 export const restoreBackupWithUndo=(text:string)=>enqueue(()=>restoreBackupWithUndoImpl(text));
 export const undoLastRestore=()=>enqueue(()=>undoLastRestoreImpl());
 export const flushPendingWrites=()=>enqueue(async()=>{},false);
+
+function positiveCents(amount:number){
+    const cents=Math.round(amount*100);
+    if(!Number.isFinite(amount)||cents<=0||cents>1e12||Math.abs(cents/100-amount)>0.000001)throw new Error('Wpisz kwotę większą od zera, z maksymalnie dwoma miejscami po przecinku.');
+    return cents;
+}
+function validateGoalName(name:string){const clean=name.trim();if(!clean||clean.length>100)throw new Error('Wpisz nazwę celu (od 1 do 100 znaków).');return clean}
+async function assertUniqueGoalName(name:string,exceptId:string){
+    const existing=await db.getAllAsync<{id:string;name:string}>('SELECT id,name FROM goals WHERE archived=0');
+    if(existing.some(goal=>goal.id!==exceptId&&goal.name.toLocaleLowerCase('pl')===name.toLocaleLowerCase('pl')))throw new Error('Masz już aktywny cel o tej nazwie.');
+}
+async function createGoalImpl(goal:{id:string;name:string;target:number;createdAt:string}){
+    const name=validateGoalName(goal.name),target=positiveCents(goal.target);
+    if(!goal.id||goal.id.length>200||!Number.isFinite(Date.parse(goal.createdAt)))throw new Error('Nieprawidłowe dane celu.');
+    const existing=await db.getFirstAsync<{name:string;target:number}>('SELECT name,target FROM goals WHERE id=?',goal.id);
+    if(existing){if(existing.name!==name||existing.target!==target)throw new Error('Ten cel już istnieje.');return;}
+    await assertUniqueGoalName(name,goal.id);
+    await db.runAsync('INSERT INTO goals(id,name,target,created_at) VALUES(?,?,?,?)',goal.id,name,target,goal.createdAt);
+}
+async function updateGoalImpl(id:string,name:string,target:number){
+    const clean=validateGoalName(name),cents=positiveCents(target);
+    const goal=await db.getFirstAsync<{archived:number}>('SELECT archived FROM goals WHERE id=?',id);
+    if(!goal||goal.archived)throw new Error('Nie można edytować zarchiwizowanego celu.');
+    await assertUniqueGoalName(clean,id);
+    await db.runAsync('UPDATE goals SET name=?,target=? WHERE id=?',clean,cents,id);
+}
+async function setGoalArchivedImpl(id:string,archived:boolean){
+    const goal=await db.getFirstAsync<{name:string}>('SELECT name FROM goals WHERE id=?',id);
+    if(!goal)throw new Error('Nie odnaleziono celu.');
+    if(!archived)await assertUniqueGoalName(goal.name,id);
+    await db.runAsync('UPDATE goals SET archived=? WHERE id=?',archived?1:0,id);
+}
+function assertMonth(period:string){if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(period))throw new Error('Nieprawidłowy miesiąc.')}
+async function getGoalsImpl(period:string,includeArchived=false):Promise<SavingsGoal[]>{
+    assertMonth(period);
+    const rows=await db.getAllAsync<{id:string;name:string;target:number;created_at:string;archived:number;saved:number;monthly:number;count:number}>(`SELECT g.*,COALESCE(SUM(c.amount),0) AS saved,COALESCE(SUM(CASE WHEN substr(c.paid_on,1,7)=? THEN c.amount ELSE 0 END),0) AS monthly,COUNT(c.id) AS count FROM goals g LEFT JOIN goal_contributions c ON c.goal_id=g.id WHERE (?=1 OR g.archived=0) GROUP BY g.id ORDER BY g.archived,g.created_at,g.rowid`,period,includeArchived?1:0);
+    return rows.map(goal=>({id:goal.id,name:goal.name,target:goal.target/100,createdAt:goal.created_at,archived:!!goal.archived,saved:goal.saved/100,monthly:goal.monthly/100,contributionCount:goal.count}));
+}
+async function getMonthGoalSavingsImpl(period:string){
+    assertMonth(period);
+    const row=await db.getFirstAsync<{amount:number}>("SELECT COALESCE(SUM(amount),0) AS amount FROM goal_contributions WHERE substr(paid_on,1,7)=?",period);
+    return (row?.amount||0)/100;
+}
+async function getGoalContributionsImpl(goalId:string):Promise<GoalContribution[]>{
+    const rows=await db.getAllAsync<{id:string;goal_id:string;amount:number;paid_on:string;created_at:string;note:string}>('SELECT * FROM goal_contributions WHERE goal_id=? ORDER BY paid_on DESC,created_at DESC,id DESC',goalId);
+    return rows.map(row=>({id:row.id,goalId:row.goal_id,amount:row.amount/100,paidOn:row.paid_on,createdAt:row.created_at,note:row.note}));
+}
+async function addGoalContributionImpl(entry:GoalContribution){
+    const cents=positiveCents(entry.amount);
+    if(!validExpenseDate(entry.paidOn))throw new Error('Nieprawidłowa data wpłaty.');
+    if(!entry.id||entry.id.length>200||entry.note.length>500||!Number.isFinite(Date.parse(entry.createdAt)))throw new Error('Nieprawidłowe dane wpłaty.');
+    const existing=await db.getFirstAsync<{goal_id:string;amount:number;paid_on:string;note:string}>('SELECT goal_id,amount,paid_on,note FROM goal_contributions WHERE id=?',entry.id);
+    if(existing){if(existing.goal_id!==entry.goalId||existing.amount!==cents||existing.paid_on!==entry.paidOn||existing.note!==entry.note.trim())throw new Error('Ta wpłata już istnieje.');return;}
+    const goal=await db.getFirstAsync<{archived:number}>('SELECT archived FROM goals WHERE id=?',entry.goalId);
+    if(!goal||goal.archived)throw new Error('Wybierz aktywny cel.');
+    await db.runAsync('INSERT INTO goal_contributions VALUES(?,?,?,?,?,?)',entry.id,entry.goalId,cents,entry.paidOn,entry.createdAt,entry.note.trim());
+}
+async function deleteGoalContributionImpl(id:string){await db.runAsync('DELETE FROM goal_contributions WHERE id=?',id)}
+export const createGoal=(...args:Parameters<typeof createGoalImpl>)=>enqueue(()=>createGoalImpl(...args));
+export const updateGoal=(...args:Parameters<typeof updateGoalImpl>)=>enqueue(()=>updateGoalImpl(...args));
+export const setGoalArchived=(...args:Parameters<typeof setGoalArchivedImpl>)=>enqueue(()=>setGoalArchivedImpl(...args));
+export const getGoals=(...args:Parameters<typeof getGoalsImpl>)=>enqueue(()=>getGoalsImpl(...args),false);
+export const getMonthGoalSavings=(...args:Parameters<typeof getMonthGoalSavingsImpl>)=>enqueue(()=>getMonthGoalSavingsImpl(...args),false);
+export const getGoalContributions=(...args:Parameters<typeof getGoalContributionsImpl>)=>enqueue(()=>getGoalContributionsImpl(...args),false);
+export const addGoalContribution=(...args:Parameters<typeof addGoalContributionImpl>)=>enqueue(()=>addGoalContributionImpl(...args));
+export const deleteGoalContribution=(...args:Parameters<typeof deleteGoalContributionImpl>)=>enqueue(()=>deleteGoalContributionImpl(...args));
+
+export const getCurrency=()=>enqueue(async()=> (await db.getFirstAsync<{value:string}>("SELECT value FROM preferences WHERE key='currency'"))?.value||'PLN',false);
+export const saveCurrency=(value:string)=>enqueue(async()=>{const clean=normalizeCurrency(value);await db.runAsync("INSERT INTO preferences(key,value) VALUES('currency',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",clean)});
