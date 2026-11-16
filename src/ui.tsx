@@ -1,3 +1,4 @@
+import {clearZeroOnFocus,normalizeEmptyAmount} from './number-input';
 import {Alert} from './alert';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
@@ -17,55 +18,50 @@ export function Field({ label, value, onChangeText, keyboardType = 'decimal-pad'
     placeholder?: string;
     commitOnBlur?: boolean;
 }) {
-    const [draft, setDraft] = useState(value);
-    const [saving, setSaving] = useState(false);
-    const focused = useRef(false);
-    const inFlight = useRef(false);
-    const lastSaved = useRef(value);
-    const commitLatest = useRef<() => Promise<void>>(async () => {});
-    useEffect(() => {
-        if (!focused.current || !commitOnBlur) setDraft(value);
-        lastSaved.current = value;
-    }, [value, commitOnBlur]);
-    async function commit() {
-        focused.current = false;
-        if (!commitOnBlur || inFlight.current || draft === lastSaved.current) return;
-        inFlight.current = true;
-        setSaving(true);
-        try {
-            await onChangeText(draft);
-            lastSaved.current = draft;
-        } catch (error) {
-            Alert.alert('Nie zapisano zmian', error instanceof Error ? error.message : 'Spróbuj ponownie.', [
-                { text: 'Anuluj', onPress: () => setDraft(value) },
-                { text: 'Ponów', onPress: () => void commit() },
+    const [draft,setDraft]=useState(value);
+    const [saving,setSaving]=useState(false);
+    const draftRef=useRef(value),focused=useRef(false),inFlight=useRef(false),lastSaved=useRef(value);
+    const commitLatest=useRef<()=>Promise<void>>(async()=>{});
+    const numeric=keyboardType==='decimal-pad';
+    function updateDraft(text:string){draftRef.current=text;setDraft(text)}
+    useEffect(()=>{
+        if(!focused.current||!commitOnBlur)updateDraft(value);
+        lastSaved.current=value;
+    },[value,commitOnBlur]);
+    async function commit(){
+        focused.current=false;
+        const text=numeric?normalizeEmptyAmount(draftRef.current):draftRef.current;
+        if(text!==draftRef.current){updateDraft(text);if(!commitOnBlur)await onChangeText(text)}
+        if(!commitOnBlur||inFlight.current||text===lastSaved.current)return;
+        inFlight.current=true;setSaving(true);
+        try{
+            await onChangeText(text);
+            lastSaved.current=text;
+            inFlight.current=false;setSaving(false);
+        }catch(error){
+            // Clear the guard before presenting Retry (browser dialogs are synchronous).
+            inFlight.current=false;setSaving(false);
+            Alert.alert('Nie zapisano zmian',error instanceof Error?error.message:'Spróbuj ponownie.',[
+                {text:'Anuluj',style:'cancel',onPress:()=>updateDraft(value)},
+                {text:'Ponów',onPress:()=>void commit()},
             ]);
-        } finally {
-            inFlight.current = false;
-            setSaving(false);
         }
     }
-    commitLatest.current = commit;
-    useFocusEffect(useCallback(() => () => { void commitLatest.current(); }, []));
-    // Persist the old field when changing a month/week removes it from the screen.
-    useEffect(() => () => { void commitLatest.current(); }, []);
-    return (
-        <View style={{ marginTop: 10 }}>
-            <Label>{label}</Label>
-            <TextInput
-                accessibilityLabel={label}
-                editable={!saving}
-                style={s.input}
-                keyboardType={keyboardType}
-                placeholder={placeholder}
-                value={draft}
-                onFocus={() => { focused.current = true; }}
-                onChangeText={text => { setDraft(text); if (!commitOnBlur) void onChangeText(text); }}
-                onBlur={() => { focused.current = false; void commit(); }}
-            />
-            {saving && <Text style={s.hint}>Zapisywanie…</Text>}
-        </View>
-    );
+    commitLatest.current=commit;
+    useFocusEffect(useCallback(()=>()=>{void commitLatest.current()},[]));
+    useEffect(()=>()=>{void commitLatest.current()},[]);
+    return <View style={{marginTop:10}}>
+        <Label>{label}</Label>
+        <TextInput accessibilityLabel={label} editable={!saving} style={s.input} keyboardType={keyboardType} placeholder={placeholder} value={draft}
+            onFocus={()=>{
+                focused.current=true;
+                const text=numeric?clearZeroOnFocus(draftRef.current):draftRef.current;
+                if(text!==draftRef.current){updateDraft(text);if(!commitOnBlur)void onChangeText(text)}
+            }}
+            onChangeText={text=>{updateDraft(text);if(!commitOnBlur)void onChangeText(text)}}
+            onBlur={()=>{void commit()}}/>
+        {saving&&<Text style={s.hint}>Zapisywanie…</Text>}
+    </View>;
 }
 
 export function reportError() { Alert.alert('Operacja nie powiodła się', 'Spróbuj ponownie. Twoje zapisane dane pozostają w bazie.'); }

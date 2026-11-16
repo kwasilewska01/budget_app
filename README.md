@@ -126,8 +126,14 @@ Instalacja PWA:
 
 W Ustawieniach jest przycisk instalacji, jeśli przeglądarka go udostępnia. Ikony i nazwa są takie same jak w aplikacji mobilnej.
 
-Dane pozostają lokalne (SQLite w prywatnym magazynie przeglądarki). Potrzebna jest aktualna przeglądarka z obsługą tego magazynu i bezpieczny adres HTTPS — localhost jest dozwolony do testów. Jednocześnie otwieraj budżet w jednej karcie/oknie; druga karta pokaże instrukcję, zamiast próbować równoczesnego zapisu. Zamknięcie strony nie usuwa zapisów. Tryb prywatny, wyczyszczenie danych witryny, usunięcie profilu przeglądarki lub automatyczne sprzątanie magazynu może je usunąć. Przycisk „Chroń lokalne dane” prosi przeglądarkę o trwały magazyn, ale nie zastępuje kopii zapasowej.
+Dane pozostają lokalne. W PWA SQLite pracuje w pamięci, a zatwierdzone dane są atomowo zapisywane w IndexedDB; dzięki temu zapis nie zależy od utrzymywania otwartego uchwytu pliku. Istniejąca baza plikowa jest automatycznie kopiowana przy pierwszym uruchomieniu nowej wersji i pozostaje zachowana. Aplikacje natywne nadal używają SQLite na dysku. Potrzebna jest aktualna przeglądarka z obsługą tego magazynu i bezpieczny adres HTTPS — localhost jest dozwolony do testów. Jednocześnie otwieraj budżet w jednej karcie/oknie; druga karta pokaże instrukcję, zamiast próbować równoczesnego zapisu. Zamknięcie strony nie usuwa zapisów. Tryb prywatny, wyczyszczenie danych witryny, usunięcie profilu przeglądarki lub automatyczne sprzątanie magazynu może je usunąć. Przycisk „Chroń lokalne dane” prosi przeglądarkę o trwały magazyn, ale nie zastępuje kopii zapasowej.
 
 PWA i aplikacja mobilna nie synchronizują danych automatycznie. Przenieś budżet plikiem JSON przez **Ustawienia → Kopia zapasowa**. Import zastępuje cały budżet; można cofnąć ostatnie przywrócenie. Cotygodniowe powiadomienia przy zamkniętej aplikacji pozostają funkcją wersji natywnej — PWA ich nie planuje.
 
 Testy PWA: `npm run test:web` po `npm run build:web`. Na Macu testy korzystają z zainstalowanego Google Chrome. Na pozostałych systemach zainstaluj przeglądarkę testową przez `npx playwright install chromium` lub wskaż ją przez `PLAYWRIGHT_EXECUTABLE_PATH`. Testy sprawdzają zapis zakupów po odświeżeniu, ponowne otwarcie offline, import/eksport i cofanie kopii, usuwanie wpisu, blokadę drugiej karty i układ na komputerze. Nie używają danych użytkownika.
+
+## Wpisywanie kwot
+
+Po wejściu w pole kwoty wartość zero znika, żeby można było od razu wpisać liczbę. Pozostawienie pustego pola przywraca zero. Niezerowe kwoty i tekstowe nazwy nie są czyszczone.
+
+Zapis PWA jest potwierdzany dopiero po zakończeniu transakcji IndexedDB. Nieudany zapis wycofuje zmiany w pamięci, więc ponowienie nie dubluje zakupów. Dodatkowe testy przeglądarkowe zamykają uchwyty OPFS, symulują odmowę zapisu, sprawdzają migrację istniejącego budżetu i edycję zerowych kwot.

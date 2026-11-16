@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import {Platform} from 'react-native';
+import {openBudgetDatabase,persistBudgetDatabase,recoverBudgetDatabase} from './database-storage';
 import { Category, Expense, MonthData, emptyMonth, validExpenseDate, weeklyCents } from './domain';
 let db: SQLite.SQLiteDatabase;
 let initialization: Promise<void> | undefined;
@@ -33,7 +34,7 @@ async function initialize() {
         if(!navigator.storage?.getDirectory)throw new Error('Ta przeglądarka nie obsługuje lokalnego zapisu budżetu. Użyj aktualnego Safari, Chrome lub Edge poza trybem prywatnym.');
         await acquireBrowserLock();
     }
-    db = await SQLite.openDatabaseAsync('moj-budzet.db');
+    db = await openBudgetDatabase();
     await db.execAsync(Platform.OS==='web'?'PRAGMA journal_mode = DELETE;':'PRAGMA journal_mode = WAL;');
     await db.execAsync(`
  CREATE TABLE IF NOT EXISTS categories(id TEXT PRIMARY KEY,name TEXT NOT NULL,kind TEXT NOT NULL,plan REAL NOT NULL DEFAULT 0,frequency TEXT NOT NULL);
@@ -74,6 +75,7 @@ async function initialize() {
             await tx.runAsync("INSERT INTO app_meta VALUES('money-cents','1')");
         });
     await ensurePlans(new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'));
+    await persistBudgetDatabase(db);
 }
 async function ensurePlans(period: string) {
     await withTransaction(async (tx) => {
@@ -198,19 +200,41 @@ async function restoreBackupImpl(text: string) {
     });
 }
 let pending: Promise<unknown> = Promise.resolve();
-function enqueue<T>(work: () => Promise<T>): Promise<T> { const result = pending.then(work); pending = result.catch(() => { }); return result; }
+function enqueue<T>(work: () => Promise<T>, durable=true): Promise<T> {
+    const result=pending.then(async()=>{
+        try{
+            const value=await work();
+            // A successful operation is acknowledged only after its durable snapshot commits.
+            if(durable)await persistBudgetDatabase(db);
+            return value;
+        }catch(error){
+            if(Platform.OS==='web'){
+                try{
+                    const previous=db;
+                    db=await recoverBudgetDatabase();
+                    try{await previous.closeAsync()}catch{}
+                }catch{
+                    throw new Error('Nie udało się otworzyć zapisanego budżetu. Odśwież aplikację, aby spróbować ponownie.');
+                }
+            }
+            throw error;
+        }
+    });
+    pending=result.catch(()=>{});
+    return result;
+}
 export const getMonthCategories = (...args: Parameters<typeof getMonthCategoriesImpl>) => enqueue(() => getMonthCategoriesImpl(...args));
 export const saveMonthCategory = (...args: Parameters<typeof saveMonthCategoryImpl>) => enqueue(() => saveMonthCategoryImpl(...args));
 export const copyPlan = (...args: Parameters<typeof copyPlanImpl>) => enqueue(() => copyPlanImpl(...args));
-export const getCategories = (...args: Parameters<typeof getCategoriesImpl>) => enqueue(() => getCategoriesImpl(...args));
+export const getCategories = (...args: Parameters<typeof getCategoriesImpl>) => enqueue(() => getCategoriesImpl(...args),false);
 export const saveCategory = (...args: Parameters<typeof saveCategoryImpl>) => enqueue(() => saveCategoryImpl(...args));
 export const deleteCategory = (...args: Parameters<typeof deleteCategoryImpl>) => enqueue(() => deleteCategoryImpl(...args));
-export const getMonth = (...args: Parameters<typeof getMonthImpl>) => enqueue(() => getMonthImpl(...args));
+export const getMonth = (...args: Parameters<typeof getMonthImpl>) => enqueue(() => getMonthImpl(...args),false);
 export const saveMonth = (...args: Parameters<typeof saveMonthImpl>) => enqueue(() => saveMonthImpl(...args));
-export const getActuals = (...args: Parameters<typeof getActualsImpl>) => enqueue(() => getActualsImpl(...args));
+export const getActuals = (...args: Parameters<typeof getActualsImpl>) => enqueue(() => getActualsImpl(...args),false);
 export const saveActual = (...args: Parameters<typeof saveActualImpl>) => enqueue(() => saveActualImpl(...args));
 export const saveMonthField = (...args: Parameters<typeof saveMonthFieldImpl>) => enqueue(() => saveMonthFieldImpl(...args));
-export const exportBackup = (...args: Parameters<typeof exportBackupImpl>) => enqueue(() => exportBackupImpl(...args));
+export const exportBackup = (...args: Parameters<typeof exportBackupImpl>) => enqueue(() => exportBackupImpl(...args),false);
 export const restoreBackup = (...args: Parameters<typeof restoreBackupImpl>) => enqueue(() => restoreBackupImpl(...args));
 async function editCategoryImpl(id: string, changes: Partial<Pick<Category, 'name' | 'plan' | 'frequency'>>) {
     const current = (await getCategoriesImpl()).find(c => c.id === id);
@@ -246,7 +270,7 @@ async function getExpenseHistoryImpl(categoryId:string,period:string){
 }
 async function deleteExpenseImpl(id:string){await db.runAsync('DELETE FROM expenses WHERE id=?',id)}
 export const addExpense=(...args:Parameters<typeof addExpenseImpl>)=>enqueue(()=>addExpenseImpl(...args));
-export const getExpenseHistory=(...args:Parameters<typeof getExpenseHistoryImpl>)=>enqueue(()=>getExpenseHistoryImpl(...args));
+export const getExpenseHistory=(...args:Parameters<typeof getExpenseHistoryImpl>)=>enqueue(()=>getExpenseHistoryImpl(...args),false);
 export const deleteExpense=(...args:Parameters<typeof deleteExpenseImpl>)=>enqueue(()=>deleteExpenseImpl(...args));
 
 async function restoreBackupWithUndoImpl(text:string){
@@ -262,4 +286,4 @@ async function undoLastRestoreImpl(){
 }
 export const restoreBackupWithUndo=(text:string)=>enqueue(()=>restoreBackupWithUndoImpl(text));
 export const undoLastRestore=()=>enqueue(()=>undoLastRestoreImpl());
-export const flushPendingWrites=()=>enqueue(async()=>{});
+export const flushPendingWrites=()=>enqueue(async()=>{},false);

@@ -1,3 +1,4 @@
+import {clearZeroOnFocus} from './number-input';
 import {Alert} from './alert';
 import React, {createContext, useCallback, useContext, useEffect, useRef, useState} from 'react';
 import {ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
@@ -90,7 +91,7 @@ export function ExpenseProvider({children}: {children: React.ReactNode}) {
             {composer?<ScrollView style={{flexShrink:1}} keyboardShouldPersistTaps="handled" contentContainerStyle={{paddingBottom:12}}>
                 {categories.length===0?<Text style={s.hint}>Najpierw dodaj kategorię w Konfiguratorze.</Text>:<>
                     <Text style={s.label}>Kwota (zł)</Text>
-                    <TextInput autoFocus accessibilityLabel="Kwota nowego wydatku" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" placeholder="0,00" editable={!busy} style={[s.input,styles.amountInput]}/>
+                    <TextInput autoFocus accessibilityLabel="Kwota nowego wydatku" value={amount} onChangeText={setAmount} onFocus={()=>setAmount(clearZeroOnFocus)} keyboardType="decimal-pad" placeholder="0,00" editable={!busy} style={[s.input,styles.amountInput]}/>
                     <Text style={[s.label,{marginTop:18}]}>Kategoria</Text>
                     <View style={s.row}>{categories.map(c=><Pressable accessibilityRole="button" accessibilityState={{selected:categoryId===c.id}} disabled={busy} key={c.id} onPress={()=>setCategoryId(c.id)} style={[s.chip,categoryId===c.id&&s.chipActive]}><Text style={s.chipText}>{c.name}{c.kind==='fixed'?' · firmowe':''}</Text></Pressable>)}</View>
                     <Text style={[s.label,{marginTop:12}]}>Data wydatku</Text>
